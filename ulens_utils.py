@@ -698,21 +698,6 @@ def blind_angle(uv1, uv2, pj=[1, 1]):
     return (90 - np.angle(x[0] + 1j * x[1], deg=True)) % 180, np.dot(x, x) ** 0.5
 
 
-def check_chain(fn):
-    reader = emcee.backends.HDFBackend(fn)
-    chain = reader.get_chain(flat=True)
-    log_prob = reader.get_log_prob(flat=True)
-    np.set_printoptions(precision=5)
-    np.set_printoptions(suppress=True)
-    print(chain[-5:])
-    tau = reader.get_autocorr_time(quiet=True)
-    burnin = int(2 * np.max(tau))
-    thin = int(0.5 * np.min(tau))
-
-    print("burn-in: {0}".format(burnin))
-    print("thin: {0}".format(thin))
-
-
 def gamma2a1(gamma_lld):
     return 3 * gamma_lld / (2 + gamma_lld)
 
@@ -755,6 +740,10 @@ def loadconf(fn) -> tuple[list[dict], dict]:
 
 
 def gsa_error(mag):
+    """
+    Gaia Science Alerts error model
+    see Hodgkin 2021 et al.
+    """
     return (
         3.43779
         - (mag / 1.13759)
