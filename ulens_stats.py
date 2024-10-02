@@ -32,7 +32,9 @@ def Dchi2(
     return chi2_orig - res.fun
 
 
-def pair(t1: np.array, t2: np.array, tol: float = 0.01) -> tuple[np.array, np.array, np.array]:
+def pair(
+    t1: np.array, t2: np.array, tol: float = 0.01
+) -> tuple[np.array, np.array, np.array]:
     """
     INPUT :
         t1, t2 [np.array] - two sorted array to be paired
@@ -59,3 +61,28 @@ def pair(t1: np.array, t2: np.array, tol: float = 0.01) -> tuple[np.array, np.ar
             diff.append(t1[i1] - t2[i2])
             i1 += 1
     return np.array(ind1), np.array(ind2), np.array(diff)
+
+
+def regression(
+    x: np.array, xerr: np.array, y: np.array, yerr: np.array
+) -> tuple[np.array, np.array]:
+    """
+    INPUT:
+        x, xerr, y, yerr [np.array] - the data points and the error bars
+    OUTPUT:
+        a, b [np.array] - the linear regression coefficients
+    """
+
+    A = np.vstack([x, np.ones_like(x)]).T
+    C = np.diag(yerr**2)
+    cov = np.linalg.inv(np.dot(A.T, np.linalg.solve(C, A)))
+    b, a = np.dot(cov, np.dot(A.T, np.linalg.solve(C, y)))
+
+    def chi2(theta):
+        a, b = theta
+        return np.sum((y - a * x - b) ** 2 / (yerr**2 + a**2 * xerr**2))
+
+    res = minimize(chi2, [a, b], method="Nelder-Mead")
+    a, b = res.x
+
+    return a, b
