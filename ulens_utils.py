@@ -11,6 +11,7 @@ from astropy.coordinates import AltAz, EarthLocation, SkyCoord
 from astropy.io import fits
 from astropy.stats import sigma_clip
 from astropy.time import Time
+from scipy.stats import bootstrap
 
 
 class config:
@@ -383,9 +384,33 @@ def radec(ra_dec: str) -> tuple[float, float]:
     return alpha, delta
 
 
-def pspl2vlti(eta: float, psi: float, thetaE: float, fbfs: float = 0) -> dict:
+def espl2vlti(
+    u: float, rhos: float, psi: float, thetaE: float, fbfs: float = 0
+) -> list[np.ndarray]:
+
+    psi *= np.pi / 180
+    theta = np.linspace(0, 2 * np.pi, 361)[:-1]
+
+    _srcx = u * np.sin(psi) + rhos * np.sin(theta)
+    _srcy = u * np.cos(psi) + rhos * np.cos(theta)
+    d = (_srcy**2 + _srcx**2) ** 0.5
+    up = (d + (d**2 + 4) ** 0.5) / 2
+    un = (d - (d**2 + 4) ** 0.5) / 2
+
+    _lensx = 0
+    _lensy = 0
+    img1_x = _lensx + (_srcx - _lensx) / d * up
+    img1_y = _lensy + (_srcy - _lensy) / d * up
+
+    img2_x = _lensx + (_srcx - _lensx) / d * un
+    img2_y = _lensy + (_srcy - _lensy) / d * un
+
+    return [np.c_[img1_x, img1_y] * thetaE, np.c_[img2_x, img2_y][::-1] * thetaE]
+
+
+def pspl2vlti(par: dict) -> dict:
     """
-    INPUT:
+    INPUT[dict]   :
             eta   : flux ratio of the 2 images;
             psi   : position angle of the major image to minor image;
             thetaE: Einstein radius in milliarcsecond;
@@ -395,6 +420,7 @@ def pspl2vlti(eta: float, psi: float, thetaE: float, fbfs: float = 0) -> dict:
             L -> lens; M -> major image; m -> minor image; ud -> uniform disk; x,y -> position of the source;
     """
     # NOTE: psi measured from north to east(major image)
+    eta, psi, thetaE, fbfs = par["eta"], par["psi"], par["thetaE"], par["fbfs"]
     psi *= np.pi / 180
     if eta == 1:
         Q = 1
@@ -403,7 +429,7 @@ def pspl2vlti(eta: float, psi: float, thetaE: float, fbfs: float = 0) -> dict:
         Q = (1 - A**-2) ** -0.5
     u = ((Q - 1) * 2) ** 0.5
     up, un = (u + (u**2 + 4) ** 0.5) / 2, (u - (u**2 + 4) ** 0.5) / 2
-    # up, un = 1, -1
+
     Mx = np.sin(psi) * up * thetaE
     My = np.cos(psi) * up * thetaE
     mx = np.sin(psi) * un * thetaE
@@ -464,6 +490,40 @@ def gairmass(jd, radec_target, radec_site):
     obstime = Time(jd, format="jd")
     altaz = target.transform_to(AltAz(obstime=obstime, location=bear_mountain))
     return altaz.secz
+
+
+def lenseq(z, z1, z2, m1, m2):
+    zeta_c = z.conjugate() + m1 / (z1 - z) + m2 / (z2 - z)
+    return zeta_c.conjugate()
+
+
+def V2direc(uv, linkshead, linksnum, xc, yc, s, q, rhos, ct):
+    nn = len(lk.T)
+    V = np.zeros(len(lk.T), dtype=complex)
+    f1s = np.dot(linkshead, uv)
+    ff1s = np.exp(np.outer(f1s, loga1))
+    vec = np.array([1, 0])
+
+    z1 = -s * q / (1 + q)
+    z2 = s * 1 / (1 + q)
+    m1 = 1 / (1 + q)
+    m2 = 1 - m1
+    z0 = xc + 1j * yc
+    xys = []
+    for i in range(len(linkshead)):
+        _V = np.zeros(nn, dtype=complex)
+        _ff1s = ff1s[i]
+        vv = np.arange(linksnum[i])
+        _V = np.exp(lk[vv] * uv[0])
+        z = (linkshead[i][0] + ct[0] + vv * 0.001) + 1j * (linkshead[i][1] + ct[1])
+        z /= (1 + q) ** 0.5
+        zc = lenseq(z, z1, z2, m1, m2)
+        w = np.abs(zc - z0) / rhos
+        w[w > 1] = 1
+        # _V += ld * np.exp(lk[j] * uv[0])
+        # _V *= (1 - 0.288 * (1 - 1.5 * (1 - w**2) ** 0.5))[:, None]
+        V += _V.sum(axis=0) * _ff1s
+    return V, xys
 
 
 def V2loop_bucket(uv, linkshead, val, countsum):
@@ -599,9 +659,47 @@ def unity_bin(wl, t3phi, nperbin=23):
     return temp[:, 0], temp[:, 1], temp[:, 2]
 
 
-def loadvlti(fn, fibre="SC", nperbin=1, errnorm=1, minerr=0.5):
-    # OUTPUT:
-    # T3PHI[dict], V2[dict], FLUX[dict]
+def unity_bin_bootsrap(wl: np.ndarray, t3phi: np.ndarray, nperbin: int = 23):
+    N = len(wl)
+    bins = N // nperbin
+    temp = []
+    for i in range(bins):
+        end = (i + 1) * nperbin
+        _wl = wl[i * nperbin : end]
+        _t3phi = t3phi[i * nperbin : end]
+        ll = min(end, N) - i * nperbin
+        # mask = sigma_clip(_t3phi, sigma=3, masked=True).mask
+        # _wl = _wl[~mask]
+        # _t3phi = _t3phi[~mask]
+
+        res_t3phi = bootstrap(
+            (_t3phi,),
+            statistic=t3phisum,
+            random_state=np.random.default_rng(),
+            n_resamples=1000,
+        )
+        __wl = np.sum(_wl**2 / (ll)) ** 0.5
+        temp += [
+            [__wl, np.mean(res_t3phi.bootstrap_distribution), res_t3phi.standard_error]
+        ]
+    temp = np.array(temp)
+    return temp[:, 0], temp[:, 1], temp[:, 2]
+
+
+def loadvlti(
+    fn: str,
+    fibre: str = "SC",
+    nperbin: int = 1,
+    errnorm: float = 1.0,
+    erradd: float = 0.0,
+    minerr: float = 0.0,
+) -> tuple[dict, dict, dict]:
+    """
+    OUTPUT:
+    T3PHI[triangle][frame][WL, T3PHI, T3PHIERR, U1COORD, V1COORD, U2COORD, V2COORD, MJD, FLAG]
+    V2[baseline][frame][VIS2DATA, VIS2ERR, UCOORD, VCOORD, MJD, FLAG]
+    FLUX[telescope][frame][MJD, FLUX, FLUXERR, FLAG]
+    """
     hdu = fits.open(fn)
     tel_map = dict(zip(hdu[1].data["STA_INDEX"], hdu[1].data["STA_NAME"]))
 
@@ -615,6 +713,11 @@ def loadvlti(fn, fibre="SC", nperbin=1, errnorm=1, minerr=0.5):
         t3id = 7
         flid = 8
         wlid = 4
+    elif fibre == "aspro2":
+        v2id = 5
+        t3id = 6
+        flid = 7
+        wlid = 3
 
     WL = hdu[wlid].data["EFF_WAVE"] * 1e6
 
@@ -636,6 +739,8 @@ def loadvlti(fn, fibre="SC", nperbin=1, errnorm=1, minerr=0.5):
     baselines = [tel_map[i[0]] + tel_map[i[1]] for i in hdu[v2id].data["STA_INDEX"]]
 
     flkwd = ["MJD", "FLUX", "FLUXERR", "FLAG"]
+    if fibre == "aspro2":
+        flkwd[1] = "FLUXDATA"
     tels = [tel_map[i] for i in hdu[flid].data["STA_INDEX"]]
 
     t3 = {}
@@ -650,12 +755,14 @@ def loadvlti(fn, fibre="SC", nperbin=1, errnorm=1, minerr=0.5):
         temp["WL"] = WL
         if nperbin > 1:
             wl, t3phi = temp["WL"], temp["T3PHI"]
-            wl_bin, t3phi_bin, t3phierr_bin = unity_bin(wl, t3phi, nperbin)
+            # wl_bin, t3phi_bin, t3phierr_bin = unity_bin(wl, t3phi, nperbin)
+            wl_bin, t3phi_bin, t3phierr_bin = unity_bin_bootsrap(wl, t3phi, nperbin)
             temp["WL"] = wl_bin
             temp["T3PHI"] = t3phi_bin
             temp["T3PHIERR"] = t3phierr_bin
         e = np.array([max(i, minerr) for i in temp["T3PHIERR"]])
         temp["T3PHIERR"] = e
+        temp["T3PHIERR"] = (temp["T3PHIERR"] ** 2 + erradd**2) ** 0.5
         temp["T3PHIERR"] *= errnorm
         t3[tri].append(temp)
 
@@ -698,21 +805,52 @@ def blind_angle(uv1, uv2, pj=[1, 1]):
     return (90 - np.angle(x[0] + 1j * x[1], deg=True)) % 180, np.dot(x, x) ** 0.5
 
 
+def check_chain(fn):
+    reader = emcee.backends.HDFBackend(fn)
+    chain = reader.get_chain(flat=True)
+    log_prob = reader.get_log_prob(flat=True)
+    np.set_printoptions(precision=5)
+    np.set_printoptions(suppress=True)
+    print(chain[-5:])
+    tau = reader.get_autocorr_time(quiet=True)
+    burnin = int(2 * np.max(tau))
+    thin = int(0.5 * np.min(tau))
+
+    print("burn-in: {0}".format(burnin))
+    print("thin: {0}".format(thin))
+
+
 def gamma2a1(gamma_lld):
     return 3 * gamma_lld / (2 + gamma_lld)
 
 
-def t3chi2(t3data, t3model, tri=["U4U3U2", "U4U3U1", "U4U2U1", "U3U2U1"]):
+def t3chi2(
+    t3data,
+    t3model,
+    tri=["U4U3U2", "U4U3U1", "U4U2U1", "U3U2U1"],
+    sigma: float = 0,
+    clip: bool = False,
+) -> float:
     chi2 = 0
     for t in tri:
-        e = t3data[t][0]["T3PHIERR"]
-        dt3phi = t3data[t][0]["T3PHI"] - t3model[t][0]
-        dt3phi = (dt3phi + 180) % 360 - 180
-        chi2 += np.sum((dt3phi) ** 2 / e**2)
+        e2 = t3data[t][0]["T3PHIERR"] ** 2 + sigma**2
+        if sigma > 0.1:
+            _chi2 = (t3data[t][0]["T3PHI"] - t3model[t][0]) ** 2 / e2
+            if clip:
+                _chi2 = _chi2[1:-1]
+                e2 = e2[1:-1]
+            chi2 += np.sum(_chi2) + np.sum(np.log(e2))
+        else:
+            _chi2 = (t3data[t][0]["T3PHI"] - t3model[t][0]) ** 2 / e2
+            if clip:
+                _chi2 = _chi2[1:-1]
+            chi2 += np.sum(_chi2)
     return chi2
 
 
-def loadconf(fn) -> tuple[list[dict], dict]:
+def loadconf(
+    fn: str, mask: callable = lambda x: np.zeros(len(x[:, 0]), dtype=bool)
+) -> tuple[list[dict], dict]:
     """
     INPUT  : configuration file in TOML format
     OUTPUT : list of photometry data in dictionary and configuration in dictionary
@@ -721,19 +859,22 @@ def loadconf(fn) -> tuple[list[dict], dict]:
     data_path = conf["data_path"]
     phots = conf["phot"]
 
-    for i, pho in enumerate(phots):
+    for _, pho in enumerate(phots):
         eadd, escale = pho["eadd"], pho["escale"]
         dat = loadtxt(os.path.join(data_path, pho["name"]))
         dat[:, 2] = (dat[:, 2] ** 2 + eadd**2) ** 0.5
         dat[:, 2] = dat[:, 2] * escale
         pho["raw_data"] = dat
+        _mask = mask(dat)
         if "mask" in pho:
-            pho["mask_data"] = dat[pho["mask"]]
-            dat = np.delete(dat, pho["mask"], axis=0)
+            _mask[pho["mask"]] = True
+        pho["mask_data"] = dat[_mask]
+        pho["mask"] = np.where(_mask)[0]
+        # dat = np.delete(dat, _mask, axis=0)
+        dat = dat[~_mask]
         pho["data"] = dat
-        if "a1" in pho and not "gamma_lld" in pho:
+        if (not "a1" in pho) and "gamma_lld" in pho:
             pho["a1"] = gamma2a1(pho["gamma_lld"])
-        pho["a1"] = 0
         pho["flux"] = mag2flux(dat)
 
     return phots, conf
@@ -753,7 +894,9 @@ def gsa_error(mag):
     )
 
 
-def pair(t1: np.array, t2: np.array, tol: float = 0.01) -> tuple[np.array, np.array, np.array]:
+def pair(
+    t1: np.array, t2: np.array, tol: float = 0.01
+) -> tuple[np.array, np.array, np.array]:
     """
     INPUT :
         t1, t2 [np.array] - two sorted array to be paired
@@ -780,3 +923,57 @@ def pair(t1: np.array, t2: np.array, tol: float = 0.01) -> tuple[np.array, np.ar
             diff.append(t1[i1] - t2[i2])
             i1 += 1
     return np.array(ind1), np.array(ind2), np.array(diff)
+
+
+def cross(v1, v2):
+    return v1[0] * v2[1] - v1[1] * v2[0]
+
+
+def fourier(u, vertices, wl=2.2):
+    fac = np.pi / 180 / 3600 / 1000 / 1e-6  # mas*m.um -> radians
+    r = vertices.T * (fac / wl)
+    if np.dot(u, u) < 1e-8:
+        # x, y = vertices.T * np.pi / 180 / 3600 / 1000
+        # area = 0.5 * abs(np.dot(x, np.roll(y, 1)) - np.dot(y, np.roll(x, 1)))
+        # return area
+        u = [1e-3, 1e-3]
+
+    r1 = np.roll(r, -1, axis=1)
+    ravg = (r + r1) / 2
+    rdif = (r1 - r) / 2
+    udravg = np.dot(u, ravg)
+    udrdif = np.dot(u, rdif)
+    ucrdif = cross(u, rdif)
+    tmp = -2j * np.exp(-2j * np.pi * udravg) * ucrdif
+    fac = np.sin(udrdif) / udrdif
+
+    fac[np.where(abs(udrdif) < 1e-8)] = 1
+    return np.sum(fac * tmp) * (4 * np.pi**2 * np.dot(u, u)) ** -1
+
+
+def beta(param: dict, piS: float) -> float:
+    # INPUT: VBBL parameters
+    kappa = 8.144
+    thetaE = 0.75
+    if not "piE" in param:
+        pi1, pi2 = param["pi1"], param["pi2"]
+        piE2 = pi1**2 + pi2**2
+        piE = piE2**0.5
+    else:
+        piE = param["piE"]
+    if param["s"] > 1:
+        sc = (param["q"] + 1) ** 0.5
+        thetaE *= sc
+        piE /= sc
+    gamma2 = (param["dsdt"] / param["s"]) ** 2 + (param["dalphadt"]) ** 2
+    beta = (
+        kappa
+        * (365**2)
+        / 8
+        / np.pi**2
+        * piE
+        / thetaE
+        * gamma2
+        * (param["s"] / (piE + piS / thetaE)) ** 3
+    )
+    return beta

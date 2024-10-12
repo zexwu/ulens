@@ -3,8 +3,25 @@ import VBBinaryLensing
 
 VBBL = VBBinaryLensing.VBBinaryLensing()
 
+
 # VBBL.t0_par = 9895
 # VBBL.t0_kep = 10001.8
+def ESPL(t, param, a1=0, sat=0):
+    VBBL.satellite = 0
+    if sat:
+        VBBL.satellite = sat
+    VBBL.a1 = a1
+    t0, u0, tE, rho, pi1, pi2 = [
+        param[i] for i in ["t0", "u0", "tE", "rho", "pi1", "pi2"]
+    ]
+    y1 = len(t) * [0]
+    y2 = len(t) * [0]
+    mag = np.array(
+        VBBL.ESPLLightCurveParallax(
+            [(u0), np.log(tE), t0, np.log(rho), pi1, pi2], t, y1, y2
+        )
+    )
+    return mag
 
 
 def Binary_model(t, param, plx=False, a1=0, sat=0):
@@ -38,7 +55,19 @@ def Binary_model2d(t, param, plx=False, a1=0):
     y1 = np.zeros(len(t))
     y2 = np.zeros(len(t))
     seps = np.zeros(len(t))
-    vbbl_par = [np.log(s), np.log(q), u0, alpha, np.log(rho), np.log(tE), t0, pi1, pi2, dsdt, dalphadt]
+    vbbl_par = [
+        np.log(s),
+        np.log(q),
+        u0,
+        alpha,
+        np.log(rho),
+        np.log(tE),
+        t0,
+        pi1,
+        pi2,
+        dsdt,
+        dalphadt,
+    ]
     return np.array(VBBL.BinaryLightCurveOrbital2d(vbbl_par, t, y1, y2, seps))
 
 
