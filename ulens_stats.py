@@ -67,9 +67,10 @@ def regression(
     x: np.array, xerr: np.array, y: np.array, yerr: np.array
 ) -> tuple[np.array, np.array]:
     """
-    INPUT:
+    Paremeters:
         x, xerr, y, yerr [np.array] - the data points and the error bars
-    OUTPUT:
+
+    Return:
         a, b [np.array] - the linear regression coefficients
     """
 

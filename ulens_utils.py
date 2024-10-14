@@ -36,13 +36,18 @@ def bin(
     nbin: int = 20,
 ) -> np.ndarray:
     """
-    INPUT:
-        data[np.ndarray]
-        saxis[int]: axis of the index to be binned, should be sorted
-        vaxis[int]: axis of the value to be binned
-        waxis[int]: axis of the binning weight
-        nsigma[int]: sigma clipping threshold, default 3
-        nbin[int]: number of bins, default 20
+    Returns the binned data weighted by the inverse square of the error.
+
+    Parameters:
+        data:np.ndarray
+        saxis:int axis of the index to be binned, should be sorted
+        vaxis:int axis of the value to be binned
+        waxis:int axis of the binning weight
+        nsigma:int sigma clipping threshold, default 3
+        nbin:int number of bins, default 20
+
+    Returns:
+        data_binned:np.ndarray
     """
     data = np.array(sorted(data, key=lambda x: x[saxis]))
     breaks = jenkspy.jenks_breaks(data[:, saxis], int(nbin))
@@ -81,11 +86,14 @@ def loadtxt(fn: str, subs: bool = True, usecols: tuple = (0, 1, 2)) -> np.ndarra
 
 def mag2flux(data: np.ndarray, refmag: float = 18) -> np.ndarray:
     """
-    INPUT:
-        data[np.ndarray] : [[time1, mag1, err1], [time2, mag2, err2], ...]
-        refmag[float]    : reference magnitude, default 18
-    OUTPUT:
-        data[np.ndarray] : [[time1, flux1, ferr1], [time2, flux2, ferr2], ...]
+    Convert magnitude to flux
+
+    Parameters:
+        data:np.ndarray     [[time1, mag1, err1], [time2, mag2, err2], ...]
+        refmag:float        reference magnitude, default 18
+
+    Returns:
+        data:np.ndarray     [[time1, flux1, ferr1], [time2, flux2, ferr2], ...]
     """
     _data = data.copy()
     if len(_data) == 1 and _data.ndim == 1:
@@ -101,11 +109,14 @@ def mag2flux(data: np.ndarray, refmag: float = 18) -> np.ndarray:
 
 def flux2mag(data: np.ndarray, refmag: float = 18) -> np.ndarray:
     """
-    INPUT:
-        data[np.ndarray] : [[time1, flux1, ferr1], [time2, flux2, ferr2], ...]
-        refmag[float]    : reference magnitude, default 18
-    OUTPUT:
-        data[np.ndarray] : [[time1, mag1, err1], [time2, mag2, err2], ...]
+    Convert flux to magnitude
+
+    Parameters:
+        data:np.ndarray     [[time1, flux1, ferr1], [time2, flux2, ferr2], ...]
+        refmag:float        reference magnitude, default 18
+
+    Returns:
+        data:np.ndarray     [[time1, mag1, err1], [time2, mag2, err2], ...]
     """
     _data = data.copy()
     refmag = 18
@@ -133,17 +144,18 @@ def getchi2_single(
     data: np.ndarray, model: np.ndarray, blending: bool = False, ap: bool = False
 ):
     """
-    INPUT:
-        data[np.ndarray] :
-            [[time1, time2, ...], [flux1, flux2, ...], [ferr1, ferr2, ...]]
+    Calculate chi2 for using data & model
 
-        model[np.ndarray]: [A1, A2, A3, ...]
-        blending[bool]   : blending flag
-        ap[bool]         : aperture flux correction flag
+    Parameters:
+        data:np.ndarray     [[time1, time2, ...], [flux1, flux2, ...], [ferr1, ferr2, ...]]
 
-    OUTPUT:
-        chi2[float]      : chi2 value
-        f[np.ndarray]    : [f1, f2, f3], source flux, lens flux and ap flux
+        model:np.ndarray    [A1, A2, A3, ...]
+        blending:bool       blending flag
+        ap:bool             aperture correction flag
+
+    Returns:
+        chi2:float
+        f:np.array          [f1, f2, f3], source flux, lens flux and ap flux
     """
     dat = data.T
     y = dat[1] / dat[2]
@@ -410,14 +422,15 @@ def espl2vlti(
 
 def pspl2vlti(par: dict) -> dict:
     """
-    INPUT[dict]   :
-            eta   : flux ratio of the 2 images;
-            psi   : position angle of the major image to minor image;
-            thetaE: Einstein radius in milliarcsecond;
-            fbfs  : flux ratio of the blended flux to the flux of the source;
-    OUTPUT:
-            The dictionary of components of the model centered on the lens;
-            L -> lens; M -> major image; m -> minor image; ud -> uniform disk; x,y -> position of the source;
+    Parameters[dict]:
+        eta[float]      flux ratio of the 2 images;
+        psi[float]      position angle of the major image to minor image;
+        thetaE[float]   Einstein radius in milliarcsecond;
+        fbfs[float]     flux ratio of the blended flux to the flux of the source;
+
+    Returns[dict]:
+        The dictionary of components of the model centered on the lens;
+        L -> lens; M -> major image; m -> minor image; ud -> uniform disk; x,y -> position of the source;
     """
     # NOTE: psi measured from north to east(major image)
     eta, psi, thetaE, fbfs = par["eta"], par["psi"], par["thetaE"], par["fbfs"]
@@ -453,12 +466,15 @@ def pspl2vlti(par: dict) -> dict:
 
 def VIS(uv: np.ndarray, wl: np.ndarray, par: dict) -> complex:
     """
-    INPUT:
-        uv[np.ndarray] : [u, v] coordinates in [m]
-        wl[np.ndarray] : wavelength in [um]
-        par[dict]      : dictionary of components, e.g. A,x:... A,y:... A,f
-    OUTPUT:
-        vis[complex]   : complex visibility
+    Compute the visibility at *uv* coordinate and *wl* with given *par* components
+
+    Parameters:
+        uv:np.ndarray       [u, v] coordinates in [m]
+        wl:np.ndarray       wavelength in [um]
+        par:dict            dictionary of components, e.g. A,x:... A,y:... A,f
+
+    Returns:
+        vis:complex         complex visibility
     """
     u, v = uv
     component = list(set([i.split(",")[0] for i in par.keys()]))
@@ -473,12 +489,14 @@ def VIS(uv: np.ndarray, wl: np.ndarray, par: dict) -> complex:
 
 def T3(uv1: np.ndarray, uv2: np.ndarray, wl: np.ndarray, par: dict) -> complex:
     """
-    INPUT:
-        uv1,2[np.ndarray] : [u, v] coordinates in [m]
-        wl[np.ndarray]    : wavelength in [um]
-        par[dict]         : dictionary of components, e.g. A,x:... A,y:... A,f
-    OUTPUT:
-        t3[complex]       : bispectrum[complex]
+    Parameters:
+        uv1:np.ndarray      [u, v] coordinates in [m]
+        uv2:np.ndarray      [u, v] coordinates in [m]
+        wl:np.ndarray       wavelength in [um]
+        par:dict            dictionary of components, e.g. A,x:... A,y:... A,f
+
+    Returns:
+        t3:complex          the bispectrum[complex]
     """
     uv3 = (-uv1[0] - uv2[0], -uv1[1] - uv2[1])
     return VIS(uv1, wl, par) * VIS(uv2, wl, par) * VIS(uv3, wl, par)
@@ -629,10 +647,12 @@ def connect_segs(segs, tol=0.1):
 
 def t3phisum(t3phi: np.ndarray) -> float:
     """
-    INPUT:
-        t3phi[np.ndarray] : list of t3phi in [degree]
+    Unity binning of closure phases
 
-    OUTPUT:
+    Parameters:
+        t3phi:np.ndarray    list of t3phi in [degree]
+
+    Returns:
         binned t3phi in [degree]
     """
     return np.angle(np.sum(np.exp(1j * t3phi / 180 * np.pi)), deg=True)
@@ -695,10 +715,18 @@ def loadvlti(
     minerr: float = 0.0,
 ) -> tuple[dict, dict, dict]:
     """
-    OUTPUT:
-    T3PHI[triangle][frame][WL, T3PHI, T3PHIERR, U1COORD, V1COORD, U2COORD, V2COORD, MJD, FLAG]
-    V2[baseline][frame][VIS2DATA, VIS2ERR, UCOORD, VCOORD, MJD, FLAG]
-    FLUX[telescope][frame][MJD, FLUX, FLUXERR, FLAG]
+    Parameters:
+        fn:str          filename of the fits file
+        fibre:str       target type, either SC, FT or aspro2
+        nperbin:int     number of data points per bin
+        errnorm:float   normalization factor for error
+        erradd:float    additional quadratic error
+        minerr:float    minimum error threshold
+
+    Returns:
+        T3PHI[triangle][frame][WL, T3PHI, T3PHIERR, U1COORD, V1COORD, U2COORD, V2COORD, MJD, FLAG]
+        V2[baseline][frame][VIS2DATA, VIS2ERR, UCOORD, VCOORD, MJD, FLAG]
+        FLUX[telescope][frame][MJD, FLUX, FLUXERR, FLAG]
     """
     hdu = fits.open(fn)
     tel_map = dict(zip(hdu[1].data["STA_INDEX"], hdu[1].data["STA_NAME"]))
@@ -852,8 +880,14 @@ def loadconf(
     fn: str, mask: callable = lambda x: np.zeros(len(x[:, 0]), dtype=bool)
 ) -> tuple[list[dict], dict]:
     """
-    INPUT  : configuration file in TOML format
-    OUTPUT : list of photometry data in dictionary and configuration in dictionary
+    Load photometry data from configuration file
+
+    Parameters: 
+        fn:str          configuration file in TOML format
+        mask:callable   function return the mask to the data
+
+    Returns: 
+        list of photometry data in dictionary and configuration in dictionary
     """
     conf = toml.load(fn)
     data_path = conf["data_path"]
@@ -898,12 +932,13 @@ def pair(
     t1: np.array, t2: np.array, tol: float = 0.01
 ) -> tuple[np.array, np.array, np.array]:
     """
-    INPUT :
-        t1, t2 [np.array] - two sorted array to be paired
-        tol[float] - tolerance for pairing
+    Parameters:
+        t1:np.ndarray       time series 1 to be paired
+        t2:np.ndarray       time series 2 to be paired
+        tol:float           tolerance for pairing
 
-
-    OUTPUT: the indices of the pairs w.r.t. t1 and t2.
+    Returns: 
+        the indices of the pairs w.r.t. t1 and t2.
     """
     ind1 = []
     ind2 = []
