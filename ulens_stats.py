@@ -38,7 +38,7 @@ def pair(
     """
     INPUT :
         t1, t2 [np.array] - two sorted array to be paired
-        tol[float] - tolerance for pairing
+        tol [float] - tolerance for pairing
 
 
     OUTPUT: the indices of the pairs w.r.t. t1 and t2.

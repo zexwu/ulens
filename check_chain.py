@@ -4,11 +4,16 @@ import sys
 sys.path.append(os.getcwd())
 import emcee
 import numpy as np
+from subprocess import Popen
+
 
 from setup import best_filename, bk_filename, fit_config, out_filename
 from astropy.table import Table
 
 filename = bk_filename
+Popen(["cp", filename, "temp.h5"]).wait()
+filename = "temp.h5"
+
 reader = emcee.backends.HDFBackend(filename)
 chain = reader.get_chain(flat=True)
 log_prob = reader.get_log_prob(flat=True)
@@ -42,22 +47,23 @@ output = np.vstack(
     )
 ).T
 header = ["chi2"] + fit_config.parameters_to_fit + fit_config.blobs
+print(header)
+print(output[0])
 tab = Table(
     data=output,
     names=header,
-    dtype=len(header) * ["f8"],
+    dtype=len(header) * ["f4"],
 )
 for x in fit_config.param_fix:
     tab[x] = fit_config.param_fix[x]
-formatter = {i: ".5f" for i in header}
-if "t0" in formatter:
-    del formatter["t0"]
-if "u0" in formatter:
-    del formatter["u0"]
+
+
+id = np.argmin(tab["chi2"])
+print(tab[id:id+1].to_pandas().to_dict("records")[0])
+tab[id:id+1].write(best_filename, overwrite=True)
+
+formatter = {i: ".7f" for i in header}
 for i in formatter.keys():
     tab[i].info.format = formatter[i]
 tab.write(out_filename, format="csv", overwrite=True)
 
-tab.sort("chi2")
-print(tab[:1].to_pandas().to_dict("records")[0])
-tab[:1].write(best_filename, overwrite=True)

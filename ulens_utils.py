@@ -645,6 +645,45 @@ def connect_segs(segs, tol=0.1):
     return chains
 
 
+def segs2images2(segs, tol=1e-8):
+    segs2connect = []
+    outimages = []
+    for i in segs[:]:
+        x = i.T
+        r = x[0] ** 2 + x[1] ** 2
+        x = x.T[r > 0]
+        if len(x) <= 1:
+            continue
+        if np.sum((x[0] - x[-1]) ** 2) < tol**2:
+            outimages.append(x)
+        else:
+            segs2connect.append(x)
+    chains = connect_segs2(segs2connect)
+    for img in chains:
+        img += [img[0][0]]
+        outimages.append(np.vstack(img))
+    return outimages
+
+def connect_segs2(_segs, tol=0.1):
+    segs = _segs.copy()
+    ll = len(segs)
+    if not ll:
+        return []
+
+    start = np.array([segs[i][0] for i in range(ll)])
+    ends = np.array([segs[i][-1] for i in range(ll)])
+    while len(segs) > 0:
+        dist = scipy.spatial.distance.cdist(ends, start)
+        idx = np.argmin(dist)
+        if dist[idx] > tol:
+            break
+        segs[idx[0]] = np.vstack([segs[idx[0]], segs[idx[1]]])
+        del segs[idx[1]]
+        start = np.array([segs[i][0] for i in range(ll)])
+        ends = np.array([segs[i][-1] for i in range(ll)])
+    return segs
+
+
 def t3phisum(t3phi: np.ndarray) -> float:
     """
     Unity binning of closure phases
