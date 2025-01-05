@@ -1,16 +1,13 @@
 import os
 
-import astropy.units as u
 import emcee
 import jenkspy
 import numpy as np
 import scipy
 import scipy.optimize as op
 import toml
-from astropy.coordinates import AltAz, EarthLocation, SkyCoord
 from astropy.io import fits
 from astropy.stats import sigma_clip
-from astropy.time import Time
 from scipy.stats import bootstrap
 
 
@@ -502,14 +499,6 @@ def T3(uv1: np.ndarray, uv2: np.ndarray, wl: np.ndarray, par: dict) -> complex:
     return VIS(uv1, wl, par) * VIS(uv2, wl, par) * VIS(uv3, wl, par)
 
 
-def gairmass(jd, radec_target, radec_site):
-    target = SkyCoord(ra=151.7690, dec=-66.1809, unit="deg")
-    bear_mountain = EarthLocation(lat=-30.47 * u.deg, lon=-70.765 * u.deg, height=0)
-    obstime = Time(jd, format="jd")
-    altaz = target.transform_to(AltAz(obstime=obstime, location=bear_mountain))
-    return altaz.secz
-
-
 def lenseq(z, z1, z2, m1, m2):
     zeta_c = z.conjugate() + m1 / (z1 - z) + m2 / (z2 - z)
     return zeta_c.conjugate()
@@ -520,7 +509,6 @@ def V2direc(uv, linkshead, linksnum, xc, yc, s, q, rhos, ct):
     V = np.zeros(len(lk.T), dtype=complex)
     f1s = np.dot(linkshead, uv)
     ff1s = np.exp(np.outer(f1s, loga1))
-    vec = np.array([1, 0])
 
     z1 = -s * q / (1 + q)
     z2 = s * 1 / (1 + q)
@@ -592,59 +580,6 @@ def resolution_setup(step, wl, maxlen=2048):
         lk[i] = -2j * factot * i * step
 
 
-def segs2images(segs, tol=1e-8):
-    segs2connect = []
-    outimages = []
-    for i in segs[:]:
-        x = i.T
-        r = x[0] ** 2 + x[1] ** 2
-        x = x.T[r > 0]
-        if len(x) <= 1:
-            continue
-        if np.sum((x[0] - x[-1]) ** 2) < tol**2:
-            outimages.append(x)
-        else:
-            segs2connect.append(x)
-    # print(len(outimages))
-    # print(len(segs2connect))
-    chains = connect_segs(segs2connect)
-    # print()
-    # print(len(outimages))
-    # print(len(segs2connect))
-    # print(chains)
-    # print()
-    for c in chains:
-        img = []
-        for id in c:
-            img += [segs2connect[id]]
-        img += [img[0][0]]
-        outimages.append(np.vstack(img))
-    return outimages
-
-
-def connect_segs(segs, tol=0.1):
-    ll = len(segs)
-    if not ll:
-        return []
-    start = np.array([segs[i][0] for i in range(ll)])
-    ends = np.array([segs[i][-1] for i in range(ll)])
-    left = list(range(ll))
-    now = left[0]
-    chain = []
-    chains = []
-    while len(left) > 0:
-        dist = scipy.spatial.distance.cdist([ends[now]], start[left])[0]
-        next = np.argmin(dist)
-        now = left[next]
-        if dist[next] > tol and len(chain) > 1:
-            chains += [chain]
-            chain = []
-        chain.append(now)
-        left.remove(now)
-    chains.append(chain)
-    return chains
-
-
 def segs2images2(segs, tol=1e-8):
     segs2connect = []
     outimages = []
@@ -659,29 +594,30 @@ def segs2images2(segs, tol=1e-8):
         else:
             segs2connect.append(x)
     chains = connect_segs2(segs2connect)
-    for img in chains:
-        img += [img[0][0]]
-        outimages.append(np.vstack(img))
+    outimages += chains
     return outimages
+
 
 def connect_segs2(_segs, tol=0.1):
     segs = _segs.copy()
-    ll = len(segs)
-    if not ll:
+    if not len(segs):
         return []
-
-    start = np.array([segs[i][0] for i in range(ll)])
-    ends = np.array([segs[i][-1] for i in range(ll)])
+    temp = []
     while len(segs) > 0:
+        start = np.array([segs[i][0] for i in range(len(segs))])
+        ends = np.array([segs[i][-1] for i in range(len(segs))])
         dist = scipy.spatial.distance.cdist(ends, start)
-        idx = np.argmin(dist)
+        idx = np.unravel_index(dist.argmin(), dist.shape)
         if dist[idx] > tol:
             break
-        segs[idx[0]] = np.vstack([segs[idx[0]], segs[idx[1]]])
+        if not idx[0] == idx[1]:
+            segs[idx[0]] = np.vstack([segs[idx[0]], segs[idx[1]]])
+        else:
+            temp.append(segs[idx[0]])
         del segs[idx[1]]
-        start = np.array([segs[i][0] for i in range(ll)])
-        ends = np.array([segs[i][-1] for i in range(ll)])
-    return segs
+    segs = [np.vstack([i, i[0]]) for i in segs]
+    temp = [np.vstack([i, i[0]]) for i in temp]
+    return segs + temp
 
 
 def t3phisum(t3phi: np.ndarray) -> float:
@@ -921,11 +857,11 @@ def loadconf(
     """
     Load photometry data from configuration file
 
-    Parameters: 
+    Parameters:
         fn:str          configuration file in TOML format
         mask:callable   function return the mask to the data
 
-    Returns: 
+    Returns:
         list of photometry data in dictionary and configuration in dictionary
     """
     conf = toml.load(fn)
@@ -976,7 +912,7 @@ def pair(
         t2:np.ndarray       time series 2 to be paired
         tol:float           tolerance for pairing
 
-    Returns: 
+    Returns:
         the indices of the pairs w.r.t. t1 and t2.
     """
     ind1 = []
@@ -1120,3 +1056,8 @@ def get_uv(T1, T2, ha, radec):
         - (cl_ * sd_ * ch_ - sl_ * cd_) * b[2]
     )
     return u, v
+
+
+def magnification_center(s, q):
+    # q1 − s(t0,par)
+    return -q / (1 + q) * (s - 1 / s) * ((s > 1) * 1)

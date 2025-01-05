@@ -646,7 +646,7 @@ def plot_lc(
     modelplot_kwargs={},
     verbose=True,
     alpha:float=1,
-) -> list:
+) -> tuple:
     """
     INPUTS:
         param    : dict, model parameters to be put in modelfunc
